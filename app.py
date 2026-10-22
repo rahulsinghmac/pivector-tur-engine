@@ -50,24 +50,24 @@ if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
+    expected_cols = [
+        "Entry ID", "Timestamp", "Cluster Head Email", "Cluster Head Name",
+        "Activity Date", "Activity Category", "Specific Task / Description",
+        "Start Time", "End Time", "Duration (Hours)", "Outcome / Deliverable",
+        "Evidence Link", "Status / Verification"
+    ]
     try:
         logs_df = conn.read(worksheet="TUR_Logs", ttl="0m")
-        # Ensure correct column types
-        if logs_df is not None and not logs_df.empty:
-            logs_df["Activity Date"] = pd.to_datetime(logs_df["Activity Date"]).dt.date
+        if logs_df is not None and not logs_df.empty and "Activity Date" in logs_df.columns:
+            logs_df = logs_df.dropna(how="all")
+            logs_df["Activity Date"] = pd.to_datetime(logs_df["Activity Date"], errors="coerce").dt.date
             logs_df["Duration (Hours)"] = pd.to_numeric(logs_df["Duration (Hours)"], errors="coerce").fillna(0.0)
+            return logs_df
         else:
-            logs_df = pd.DataFrame(columns=[
-                "Entry ID", "Timestamp", "Cluster Head Email", "Cluster Head Name",
-                "Activity Date", "Activity Category", "Specific Task / Description",
-                "Start Time", "End Time", "Duration (Hours)", "Outcome / Deliverable",
-                "Evidence Link", "Status / Verification"
-            ])
-        return logs_df
+            return pd.DataFrame(columns=expected_cols)
     except Exception as e:
         st.error(f"Error loading logs: {e}")
-        return pd.DataFrame()
-
+        return pd.DataFrame(columns=expected_cols)
 def load_categories():
     try:
         tax_df = conn.read(worksheet="Activity_Taxonomy", ttl="10m")
