@@ -38,6 +38,15 @@ st.markdown("""
 # ---------------------------------------------------------
 # Database Connection & Caching
 # ---------------------------------------------------------
+# Insert this directly above: conn = st.connection("gsheets", type=GSheetsConnection)
+
+if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+    raw_key = st.secrets["connections"]["gsheets"].get("private_key", "")
+    # Ensure escaped \n characters get converted to true newlines if needed
+    if "\\n" in raw_key:
+        st.secrets["connections"]["gsheets"]["private_key"] = raw_key.replace("\\n", "\n")
+
+
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
