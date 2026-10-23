@@ -68,17 +68,18 @@ EXPECTED_LOG_COLS = [
 ]
 
 @st.cache_data(ttl=60)
+# 1. Update the directory loader to disable aggressive caching and normalize PIN formatting
 def get_users_directory():
     try:
-        df = conn.read(worksheet="Users_Directory", ttl="1m")
+        df = conn.read(worksheet="Users_Directory", ttl="0m")
         if df is not None and not df.empty:
             df["Email"] = df["Email"].astype(str).str.strip().str.lower()
-            df["PIN"] = df["PIN"].astype(str).str.strip()
+            # Handles numeric values like 1234 or 1234.0 properly into '1234'
+            df["PIN"] = df["PIN"].astype(str).str.replace(".0", "", regex=False).str.strip()
             return df
     except Exception:
         pass
     return pd.DataFrame(columns=["Email", "PIN", "Name", "Role", "Program / Pod Name", "Reporting To Email"])
-
 def get_logs():
     try:
         df = conn.read(worksheet="TUR_Logs", ttl="0m")
