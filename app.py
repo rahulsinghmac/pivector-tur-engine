@@ -178,18 +178,23 @@ if not st.session_state.authenticated_user:
             entered_pin = st.text_input("4-Digit Access PIN", type="password", max_chars=4, placeholder="••••").strip()
             login_btn = st.button("Authenticate & Enter ➔", use_container_width=True)
 
-        if login_btn:
-            if not entered_email or not entered_pin:
-                st.warning("Please enter both your work email and 4-digit PIN.")
-            else:
-                user_match = users_df[(users_df["Email"] == entered_email) & (users_df["PIN"] == entered_pin)]
-                if not user_match.empty:
-                    user_data = user_match.iloc[0].to_dict()
-                    st.session_state.authenticated_user = user_data
-                    st.success(f"Verified! Welcome, {user_data['Name']}.")
-                    st.rerun()
-                else:
-                    st.error("Invalid email or PIN. Please check your credentials.")
+        # 2. In the login button block:
+if login_btn:
+    if not entered_email or not entered_pin:
+        st.warning("Please enter both your work email and 4-digit PIN.")
+    else:
+        # Re-fetch directory fresh on submit
+        fresh_users = get_users_directory()
+        user_match = fresh_users[
+            (fresh_users["Email"] == entered_email.strip().lower()) & 
+            (fresh_users["PIN"] == entered_pin.strip())
+        ]
+        if not user_match.empty:
+            user_data = user_match.iloc[0].to_dict()
+            st.session_state.authenticated_user = user_data
+            st.rerun()
+        else:
+            st.error("Invalid email or PIN. Please check your credentials.")
     st.stop()
 
 # ---------------------------------------------------------
