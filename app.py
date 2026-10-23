@@ -292,13 +292,20 @@ elif user_role == "Program Head":
     # Supervised cluster heads for this Program Head
     pod_cluster_heads = users_df[
         (users_df["Role"] == "Cluster Head") &
-        ((users_df["Reporting To Email"] == user_email) | (users_df["Program / Pod Name"] == user_pod))
+        ((users_df["Reporting To Email"].str.lower() == user_email) | (users_df["Program / Pod Name"] == user_pod))
     ]
-    pod_emails = pod_cluster_heads["Email"].tolist()
+    pod_emails = pod_cluster_heads["Email"].str.lower().tolist()
 
     all_logs = get_logs()
-    pod_logs = all_logs[all_logs["Cluster Head Email"].str.lower().isin(pod_emails)] if not all_logs.empty else pd.DataFrame()
-    my_ph_logs = all_logs[all_logs["Cluster Head Email"].str.lower() == user_email] if not all_logs.empty else pd.DataFrame()
+    
+    # Safe filtering for pod logs and Program Head's own logs
+    if not all_logs.empty and "Cluster Head Email" in all_logs.columns:
+        logs_emails_clean = all_logs["Cluster Head Email"].astype(str).str.strip().str.lower()
+        pod_logs = all_logs[logs_emails_clean.isin(pod_emails)].copy()
+        my_ph_logs = all_logs[logs_emails_clean == user_email].copy()
+    else:
+        pod_logs = pd.DataFrame(columns=EXPECTED_LOG_COLS)
+        my_ph_logs = pd.DataFrame(columns=EXPECTED_LOG_COLS)
 
     ph_tab_review, ph_tab_self, ph_tab_my_history = st.tabs([
         f"👥 {user_pod} Pod Review", 
@@ -312,11 +319,21 @@ elif user_role == "Program Head":
 
         status_data = []
         for _, ch in pod_cluster_heads.iterrows():
-            ch_email = ch["Email"]
+            ch_email = str(ch["Email"]).strip().lower()
             ch_name = ch["Name"]
-            ch_today = pod_logs[(pod_logs["Cluster Head Email"] == ch_email) & (pod_logs["Activity Date"] == today_date)]
-            hours_today = ch_today["Duration (Hours)"].sum() if not ch_today.empty else 0.0
-            slots_count = len(ch_today)
+            
+            # Safely check today's logs if pod_logs is not empty
+            if not pod_logs.empty and "Activity Date" in pod_logs.columns:
+                ch_today = pod_logs[
+                    (pod_logs["Cluster Head Email"].astype(str).str.strip().str.lower() == ch_email) & 
+                    (pod_logs["Activity Date"] == today_date)
+                ]
+                hours_today = ch_today["Duration (Hours)"].sum() if not ch_today.empty else 0.0
+                slots_count = len(ch_today)
+            else:
+                hours_today = 0.0
+                slots_count = 0
+
             status_data.append({
                 "Cluster Head": ch_name,
                 "Email": ch_email,
@@ -331,15 +348,16 @@ elif user_role == "Program Head":
         
         selected_ch = st.selectbox("Filter Cluster Head", ["All Leads in Pod"] + pod_cluster_heads["Name"].tolist())
         display_logs = pod_logs.copy()
-        if selected_ch != "All Leads in Pod":
+        if selected_ch != "All Leads in Pod" and not display_logs.empty:
             display_logs = display_logs[display_logs["Cluster Head Name"] == selected_ch]
 
         if not display_logs.empty:
             cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable"]
-            sorted_pod_logs = display_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            available_cols = [c for c in cols if c in display_logs.columns]
+            sorted_pod_logs = display_logs[available_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
             st.dataframe(format_table_indexed(sorted_pod_logs), use_container_width=True)
         else:
-            st.info("No records to display.")
+            st.info("No records to display for this pod yet.")
 
     with ph_tab_self:
         st.markdown("### 📝 Record Program Head TUR")
@@ -390,11 +408,11 @@ elif user_role == "Program Head":
         st.markdown(f"### 📜 My Submitted Supervisory Logs ({user_name})")
         if not my_ph_logs.empty:
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
-            sorted_my_logs = my_ph_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            available_my_cols = [c for c in cols if c in my_ph_logs.columns]
+            sorted_my_logs = my_ph_logs[available_my_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
             st.dataframe(format_table_indexed(sorted_my_logs), use_container_width=True)
         else:
             st.info("You haven't logged any personal supervisory activities yet.")
-
 # =========================================================
 # TIER 3: CORE LEADERSHIP (Clean Executive Cockpit)
 # =========================================================
