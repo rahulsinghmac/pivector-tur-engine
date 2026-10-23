@@ -60,6 +60,15 @@ EXPECTED_LOG_COLS = [
     "Status / Verification", "Role"
 ]
 
+def format_table_indexed(df):
+    """Helper to start index from 1 and rename index to S.No."""
+    if df.empty:
+        return df
+    df_out = df.copy()
+    df_out.index = range(1, len(df_out) + 1)
+    df_out.index.name = "S.No."
+    return df_out
+
 def get_users_directory():
     try:
         df = conn.read(worksheet="Users_Directory", ttl="0m")
@@ -260,24 +269,27 @@ if user_role == "Cluster Head":
     with tab_current:
         if not today_logs.empty:
             cols = ["Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
-            st.dataframe(today_logs[cols].sort_values(by="Start Time"), use_container_width=True)
+            sorted_today = today_logs[cols].sort_values(by="Start Time", ascending=False)
+            st.dataframe(format_table_indexed(sorted_today), use_container_width=True)
         else:
             st.info("No entries recorded for this date yet.")
 
     with tab_past:
         if not my_logs.empty:
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable"]
-            st.dataframe(my_logs[cols].sort_values(by="Activity Date", ascending=False), use_container_width=True)
+            sorted_past = my_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            st.dataframe(format_table_indexed(sorted_past), use_container_width=True)
         else:
             st.info("No past logs found.")
 
 # =========================================================
-# TIER 2: PROGRAM HEAD (Pod Supervisory Review)
+# TIER 2: PROGRAM HEAD (Pod Supervisory Review & Personal Logs)
 # =========================================================
 elif user_role == "Program Head":
     st.title("⚡ Program Head Supervisory Portal")
     st.caption(f"Program Lead: **{user_name}** | Track: **{user_pod}**")
 
+    # Supervised cluster heads for this Program Head
     pod_cluster_heads = users_df[
         (users_df["Role"] == "Cluster Head") &
         ((users_df["Reporting To Email"] == user_email) | (users_df["Program / Pod Name"] == user_pod))
@@ -286,8 +298,13 @@ elif user_role == "Program Head":
 
     all_logs = get_logs()
     pod_logs = all_logs[all_logs["Cluster Head Email"].str.lower().isin(pod_emails)] if not all_logs.empty else pd.DataFrame()
+    my_ph_logs = all_logs[all_logs["Cluster Head Email"].str.lower() == user_email] if not all_logs.empty else pd.DataFrame()
 
-    ph_tab_review, ph_tab_self = st.tabs([f"👥 {user_pod} Review", "📝 Log My Program Head TUR"])
+    ph_tab_review, ph_tab_self, ph_tab_my_history = st.tabs([
+        f"👥 {user_pod} Pod Review", 
+        "📝 Log My Program Head TUR",
+        f"📜 My Submitted Logs ({len(my_ph_logs)})"
+    ])
 
     with ph_tab_review:
         today_date = date.today()
@@ -307,10 +324,10 @@ elif user_role == "Program Head":
                 "Status": "✅ Active" if slots_count > 0 else "⏳ Not Logged"
             })
 
-        st.dataframe(pd.DataFrame(status_data), use_container_width=True)
+        st.dataframe(format_table_indexed(pd.DataFrame(status_data)), use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### 📋 Activity Ledger")
+        st.markdown("### 📋 Pod Activity Ledger (Most Recent First)")
         
         selected_ch = st.selectbox("Filter Cluster Head", ["All Leads in Pod"] + pod_cluster_heads["Name"].tolist())
         display_logs = pod_logs.copy()
@@ -318,13 +335,9 @@ elif user_role == "Program Head":
             display_logs = display_logs[display_logs["Cluster Head Name"] == selected_ch]
 
         if not display_logs.empty:
-            st.dataframe(
-                display_logs[[
-                    "Activity Date", "Cluster Head Name", "Start Time", "End Time",
-                    "Duration (Hours)", "Activity Category", "Outcome / Deliverable"
-                ]].sort_values(by="Activity Date", ascending=False),
-                use_container_width=True
-            )
+            cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable"]
+            sorted_pod_logs = display_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            st.dataframe(format_table_indexed(sorted_pod_logs), use_container_width=True)
         else:
             st.info("No records to display.")
 
@@ -345,7 +358,7 @@ elif user_role == "Program Head":
             p_task = st.text_area("Supervisory Details", placeholder="Reviewing cluster performance, tutor escalations, program milestones...")
             p_out = st.text_input("Outcome / Deliverable", placeholder="e.g. Conducted weekly pod review; 2 interventions aligned")
 
-            if st.form_submit_button("Record Program Log", use_container_width=True):
+            if st.form_submit_button("Record Program Log ➔", use_container_width=True):
                 dur_min = (datetime.combine(p_date, p_e) - datetime.combine(p_date, p_s)).total_seconds() / 60
                 
                 if dur_min <= 0:
@@ -372,6 +385,15 @@ elif user_role == "Program Head":
                     conn.update(worksheet="TUR_Logs", data=updated_df)
                     st.success("Program slot saved!")
                     st.rerun()
+
+    with ph_tab_my_history:
+        st.markdown(f"### 📜 My Submitted Supervisory Logs ({user_name})")
+        if not my_ph_logs.empty:
+            cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
+            sorted_my_logs = my_ph_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            st.dataframe(format_table_indexed(sorted_my_logs), use_container_width=True)
+        else:
+            st.info("You haven't logged any personal supervisory activities yet.")
 
 # =========================================================
 # TIER 3: CORE LEADERSHIP (Clean Executive Cockpit)
@@ -429,7 +451,10 @@ else:
                     "Status": "✅ Active" if total_hrs > 0 else "⚠️ No Logs"
                 })
 
-            st.dataframe(pd.DataFrame(roster_data), use_container_width=True)
+            roster_df = pd.DataFrame(roster_data)
+            # Sort with active members on top
+            roster_df = roster_df.sort_values(by=["Total Hours", "Name"], ascending=[False, True])
+            st.dataframe(format_table_indexed(roster_df), use_container_width=True)
 
         with clt_tab_member:
             st.markdown("### 🔍 Individual Member Drill-Down")
@@ -465,22 +490,18 @@ else:
                     fig_m.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10), yaxis_title="")
                     st.plotly_chart(fig_m, use_container_width=True)
 
-                    st.markdown("#### Activity Ledger")
-                    st.dataframe(
-                        member_logs[[
-                            "Activity Date", "Start Time", "End Time", "Duration (Hours)",
-                            "Activity Category", "Specific Task / Description", 
-                            "Outcome / Deliverable"
-                        ]].sort_values(by="Activity Date", ascending=False),
-                        use_container_width=True
-                    )
+                    st.markdown("#### Activity Ledger (Most Recent First)")
+                    cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
+                    sorted_member_logs = member_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+                    st.dataframe(format_table_indexed(sorted_member_logs), use_container_width=True)
                 else:
                     st.info(f"No activity records found for {chosen_member} in the selected date range.")
 
         with clt_tab_export:
             st.markdown("### 📥 Export Filtered Logs")
             export_cols = [c for c in filtered_logs.columns if c != "Evidence Link"]
-            csv_data = filtered_logs[export_cols].to_csv(index=False).encode('utf-8')
+            sorted_export = filtered_logs[export_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            csv_data = sorted_export.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="Download CSV Dataset",
                 data=csv_data,
