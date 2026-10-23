@@ -165,7 +165,7 @@ if st.session_state.authenticated_user:
         st.rerun()
 
 # ---------------------------------------------------------
-# 1. Gatekeeper Login (Email + PIN)
+# Gatekeeper: Authentication Check
 # ---------------------------------------------------------
 if not st.session_state.authenticated_user:
     st.title("⚡ PiVector TUR Access Portal")
@@ -178,24 +178,33 @@ if not st.session_state.authenticated_user:
             entered_pin = st.text_input("4-Digit Access PIN", type="password", max_chars=4, placeholder="••••").strip()
             login_btn = st.button("Authenticate & Enter ➔", use_container_width=True)
 
-        # 2. In the login button block:
-if login_btn:
-    if not entered_email or not entered_pin:
-        st.warning("Please enter both your work email and 4-digit PIN.")
-    else:
-        # Re-fetch directory fresh on submit
-        fresh_users = get_users_directory()
-        user_match = fresh_users[
-            (fresh_users["Email"] == entered_email.strip().lower()) & 
-            (fresh_users["PIN"] == entered_pin.strip())
-        ]
-        if not user_match.empty:
-            user_data = user_match.iloc[0].to_dict()
-            st.session_state.authenticated_user = user_data
-            st.rerun()
-        else:
-            st.error("Invalid email or PIN. Please check your credentials.")
+        if login_btn:
+            if not entered_email or not entered_pin:
+                st.warning("Please enter both your work email and 4-digit PIN.")
+            else:
+                users_df = get_users_directory()
+                user_match = users_df[
+                    (users_df["Email"] == entered_email) & 
+                    (users_df["PIN"] == entered_pin)
+                ]
+                if not user_match.empty:
+                    user_data = user_match.iloc[0].to_dict()
+                    st.session_state.authenticated_user = user_data
+                    st.rerun()
+                else:
+                    st.error("Invalid email or PIN. Please check your credentials.")
+    
+    # Halt execution here until user logs in
     st.stop()
+
+# ---------------------------------------------------------
+# Only runs AFTER successful authentication
+# ---------------------------------------------------------
+curr_user = st.session_state.authenticated_user
+user_role = curr_user["Role"]
+user_email = curr_user["Email"]
+user_name = curr_user["Name"]
+user_pod = curr_user.get("Program / Pod Name", "")
 
 # ---------------------------------------------------------
 # Active Session Context
