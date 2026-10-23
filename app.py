@@ -57,7 +57,7 @@ EXPECTED_LOG_COLS = [
     "Entry ID", "Timestamp", "Cluster Head Email", "Cluster Head Name",
     "Activity Date", "Activity Category", "Specific Task / Description",
     "Start Time", "End Time", "Duration (Hours)", "Outcome / Deliverable",
-    "Evidence Link", "Status / Verification", "Role"
+    "Status / Verification", "Role"
 ]
 
 def get_users_directory():
@@ -191,7 +191,7 @@ user_name = curr_user["Name"]
 user_pod = curr_user.get("Program / Pod Name", "")
 
 # =========================================================
-# TIER 1: CLUSTER HEAD (Clean 24h Fast-Logger)
+# TIER 1: CLUSTER HEAD (Simple 24h Logger)
 # =========================================================
 if user_role == "Cluster Head":
     st.title("⚡ Cluster Head Daily TUR")
@@ -208,43 +208,21 @@ if user_role == "Cluster Head":
     st.markdown("### 📝 Log Time Slot")
     st.info("🕒 **Time Format:** 24-Hour Clock (e.g. 09:00 for 9:00 AM, 15:30 for 3:30 PM)")
 
-    hour_options = [f"{h:02d}" for h in range(6, 24)]
-    minute_options = ["00", "15", "30", "45"]
-
     with st.form("ch_log_form", clear_on_submit=True):
         category = st.selectbox("Activity Category", categories)
 
         col_st, col_et = st.columns(2)
         with col_st:
-            st.markdown("**Start Time (24h)**")
-            s_col1, s_col2 = st.columns(2)
-            with s_col1:
-                start_hr = st.selectbox("Hour", hour_options, index=3, key="s_hr")
-            with s_col2:
-                start_min = st.selectbox("Min", minute_options, index=0, key="s_min")
-
+            start_t = st.time_input("Start Time (24h)", value=time(9, 0))
         with col_et:
-            st.markdown("**End Time (24h)**")
-            e_col1, e_col2 = st.columns(2)
-            with e_col1:
-                end_hr = st.selectbox("Hour", hour_options, index=4, key="e_hr")
-            with e_col2:
-                end_min = st.selectbox("Min", minute_options, index=2, key="e_min")
+            end_t = st.time_input("End Time (24h)", value=time(10, 30))
 
         task_desc = st.text_area("Specific Task / Description", placeholder="Outline actions taken, topics, teachers/schools engaged...")
-        
-        col_o1, col_o2 = st.columns(2)
-        with col_o1:
-            outcome = st.text_input("Outcome / Deliverable", placeholder="e.g. Conducted 2 demo classes; scored rubric")
-        with col_o2:
-            evidence = st.text_input("Evidence Link (Google Drive / Docs)", placeholder="https://docs.google.com/...")
+        outcome = st.text_input("Outcome / Deliverable", placeholder="e.g. Conducted 2 demo classes; scored rubric")
 
         submit_btn = st.form_submit_button("Record Time Slot ➔", use_container_width=True)
 
         if submit_btn:
-            start_t = time(int(start_hr), int(start_min))
-            end_t = time(int(end_hr), int(end_min))
-
             start_dt = datetime.combine(active_date, start_t)
             end_dt = datetime.combine(active_date, end_t)
             dur_mins = (end_dt - start_dt).total_seconds() / 60
@@ -267,7 +245,6 @@ if user_role == "Cluster Head":
                     "End Time": end_t.strftime("%H:%M"),
                     "Duration (Hours)": dur_hrs,
                     "Outcome / Deliverable": outcome.strip(),
-                    "Evidence Link": evidence.strip(),
                     "Status / Verification": "Submitted",
                     "Role": "Cluster Head"
                 }])
@@ -282,23 +259,15 @@ if user_role == "Cluster Head":
     
     with tab_current:
         if not today_logs.empty:
-            cols = ["Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable", "Evidence Link"]
-            st.dataframe(
-                today_logs[cols].sort_values(by="Start Time"),
-                use_container_width=True,
-                column_config={"Evidence Link": st.column_config.LinkColumn("Evidence", display_text="Open Doc")}
-            )
+            cols = ["Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
+            st.dataframe(today_logs[cols].sort_values(by="Start Time"), use_container_width=True)
         else:
             st.info("No entries recorded for this date yet.")
 
     with tab_past:
         if not my_logs.empty:
-            cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable", "Evidence Link"]
-            st.dataframe(
-                my_logs[cols].sort_values(by="Activity Date", ascending=False),
-                use_container_width=True,
-                column_config={"Evidence Link": st.column_config.LinkColumn("Evidence", display_text="Open Doc")}
-            )
+            cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable"]
+            st.dataframe(my_logs[cols].sort_values(by="Activity Date", ascending=False), use_container_width=True)
         else:
             st.info("No past logs found.")
 
@@ -309,7 +278,6 @@ elif user_role == "Program Head":
     st.title("⚡ Program Head Supervisory Portal")
     st.caption(f"Program Lead: **{user_name}** | Track: **{user_pod}**")
 
-    # Supervised cluster heads for this Program Head
     pod_cluster_heads = users_df[
         (users_df["Role"] == "Cluster Head") &
         ((users_df["Reporting To Email"] == user_email) | (users_df["Program / Pod Name"] == user_pod))
@@ -335,7 +303,6 @@ elif user_role == "Program Head":
             status_data.append({
                 "Cluster Head": ch_name,
                 "Email": ch_email,
-                "Slots Today": slots_count,
                 "Hours Logged Today": f"{hours_today:.2f} hrs",
                 "Status": "✅ Active" if slots_count > 0 else "⏳ Not Logged"
             })
@@ -354,11 +321,9 @@ elif user_role == "Program Head":
             st.dataframe(
                 display_logs[[
                     "Activity Date", "Cluster Head Name", "Start Time", "End Time",
-                    "Duration (Hours)", "Activity Category", "Outcome / Deliverable",
-                    "Evidence Link"
+                    "Duration (Hours)", "Activity Category", "Outcome / Deliverable"
                 ]].sort_values(by="Activity Date", ascending=False),
-                use_container_width=True,
-                column_config={"Evidence Link": st.column_config.LinkColumn("Evidence Doc", display_text="Inspect")}
+                use_container_width=True
             )
         else:
             st.info("No records to display.")
@@ -367,36 +332,20 @@ elif user_role == "Program Head":
         st.markdown("### 📝 Record Program Head TUR")
         ph_categories = get_categories_for_role("Program Head")
 
-        hour_options = [f"{h:02d}" for h in range(6, 24)]
-        minute_options = ["00", "15", "30", "45"]
-
         with st.form("ph_log_form", clear_on_submit=True):
             p_date = st.date_input("Date", value=date.today(), key="ph_d")
             p_cat = st.selectbox("Supervisory Category", ph_categories)
             
             c_st, c_et = st.columns(2)
             with c_st:
-                st.markdown("**Start Time (24h)**")
-                ps1, ps2 = st.columns(2)
-                with ps1:
-                    p_s_hr = st.selectbox("Hour", hour_options, index=3, key="phs_hr")
-                with ps2:
-                    p_s_min = st.selectbox("Min", minute_options, index=0, key="phs_min")
+                p_s = st.time_input("Start Time (24h)", value=time(9, 30), key="ph_st")
             with c_et:
-                st.markdown("**End Time (24h)**")
-                pe1, pe2 = st.columns(2)
-                with pe1:
-                    p_e_hr = st.selectbox("Hour", hour_options, index=5, key="phe_hr")
-                with pe2:
-                    p_e_min = st.selectbox("Min", minute_options, index=0, key="phe_min")
+                p_e = st.time_input("End Time (24h)", value=time(11, 0), key="ph_et")
 
             p_task = st.text_area("Supervisory Details", placeholder="Reviewing cluster performance, tutor escalations, program milestones...")
             p_out = st.text_input("Outcome / Deliverable", placeholder="e.g. Conducted weekly pod review; 2 interventions aligned")
-            p_evi = st.text_input("Evidence Link", placeholder="https://docs.google.com/...")
 
             if st.form_submit_button("Record Program Log", use_container_width=True):
-                p_s = time(int(p_s_hr), int(p_s_min))
-                p_e = time(int(p_e_hr), int(p_e_min))
                 dur_min = (datetime.combine(p_date, p_e) - datetime.combine(p_date, p_s)).total_seconds() / 60
                 
                 if dur_min <= 0:
@@ -416,7 +365,6 @@ elif user_role == "Program Head":
                         "End Time": p_e.strftime("%H:%M"),
                         "Duration (Hours)": round(dur_min / 60, 2),
                         "Outcome / Deliverable": p_out.strip(),
-                        "Evidence Link": p_evi.strip(),
                         "Status / Verification": "Verified",
                         "Role": "Program Head"
                     }])
@@ -426,7 +374,7 @@ elif user_role == "Program Head":
                     st.rerun()
 
 # =========================================================
-# TIER 3: CORE LEADERSHIP (Super Glanceable Cockpit)
+# TIER 3: CORE LEADERSHIP (Clean Executive Cockpit)
 # =========================================================
 else:
     st.title("📊 CLT Executive Review Portal")
@@ -472,15 +420,13 @@ else:
 
                 u_logs = filtered_logs[filtered_logs["Cluster Head Email"].str.lower() == u_email]
                 total_hrs = u_logs["Duration (Hours)"].sum() if not u_logs.empty else 0.0
-                slots_count = len(u_logs)
 
                 roster_data.append({
                     "Name": u_name,
                     "Role": u_role,
                     "Track / Pod": u_pod,
                     "Total Hours": round(total_hrs, 2),
-                    "Total Slots": slots_count,
-                    "Status": "✅ Active" if slots_count > 0 else "⚠️ No Logs"
+                    "Status": "✅ Active" if total_hrs > 0 else "⚠️ No Logs"
                 })
 
             st.dataframe(pd.DataFrame(roster_data), use_container_width=True)
@@ -497,14 +443,11 @@ else:
                 member_email = str(member_row["Email"]).lower()
 
                 member_logs = filtered_logs[filtered_logs["Cluster Head Email"].str.lower() == member_email]
-
                 m_hrs = member_logs["Duration (Hours)"].sum() if not member_logs.empty else 0.0
-                m_slots = len(member_logs)
                 
-                c_m1, c_m2, c_m3 = st.columns(3)
+                c_m1, c_m2 = st.columns(2)
                 c_m1.metric("Track / Role", f"{member_row['Program / Pod Name']} ({member_row['Role']})")
                 c_m2.metric("Total Hours Logged", f"{m_hrs:.2f} hrs")
-                c_m3.metric("Total Activities", m_slots)
 
                 st.markdown("---")
 
@@ -522,22 +465,22 @@ else:
                     fig_m.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10), yaxis_title="")
                     st.plotly_chart(fig_m, use_container_width=True)
 
-                    st.markdown("#### Activity & Evidence Ledger")
+                    st.markdown("#### Activity Ledger")
                     st.dataframe(
                         member_logs[[
                             "Activity Date", "Start Time", "End Time", "Duration (Hours)",
                             "Activity Category", "Specific Task / Description", 
-                            "Outcome / Deliverable", "Evidence Link"
+                            "Outcome / Deliverable"
                         ]].sort_values(by="Activity Date", ascending=False),
-                        use_container_width=True,
-                        column_config={"Evidence Link": st.column_config.LinkColumn("Evidence Doc", display_text="Open Evidence")}
+                        use_container_width=True
                     )
                 else:
                     st.info(f"No activity records found for {chosen_member} in the selected date range.")
 
         with clt_tab_export:
             st.markdown("### 📥 Export Filtered Logs")
-            csv_data = filtered_logs.to_csv(index=False).encode('utf-8')
+            export_cols = [c for c in filtered_logs.columns if c != "Evidence Link"]
+            csv_data = filtered_logs[export_cols].to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="Download CSV Dataset",
                 data=csv_data,
