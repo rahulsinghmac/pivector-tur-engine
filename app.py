@@ -61,7 +61,6 @@ EXPECTED_LOG_COLS = [
 ]
 
 def format_table_indexed(df):
-    """Helper to start index from 1 and rename index to S.No."""
     if df.empty:
         return df
     df_out = df.copy()
@@ -200,7 +199,7 @@ user_name = curr_user["Name"]
 user_pod = curr_user.get("Program / Pod Name", "")
 
 # =========================================================
-# TIER 1: CLUSTER HEAD (Simple 24h Logger)
+# TIER 1: CLUSTER HEAD (Logger + Edit / Delete My Entries)
 # =========================================================
 if user_role == "Cluster Head":
     st.title("⚡ Cluster Head Daily TUR")
@@ -263,6 +262,82 @@ if user_role == "Cluster Head":
                 st.success(f"Slot recorded: {dur_hrs} hrs under '{category}'!")
                 st.rerun()
 
+    # Self-Service Edit / Delete Panel
+    if not my_logs.empty:
+        with st.expander("✏️ Edit or Delete an Existing Entry"):
+            st.caption("Select one of your previously submitted entries to update or remove.")
+            
+            # Format choices cleanly
+            my_logs_sorted = my_logs.sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+            entry_options = {}
+            for _, r in my_logs_sorted.iterrows():
+                eid = str(r["Entry ID"])
+                label = f"{r['Activity Date']} | {r['Start Time']}-{r['End Time']} | {r['Activity Category']} ({r['Outcome / Deliverable'][:30]}...)"
+                entry_options[label] = eid
+
+            chosen_label = st.selectbox("Select Entry to Modify", list(entry_options.keys()))
+            chosen_eid = entry_options[chosen_label]
+            selected_row = my_logs[my_logs["Entry ID"].astype(str) == str(chosen_eid)].iloc[0]
+
+            # Parse times safely
+            try:
+                s_parts = [int(p) for p in str(selected_row["Start Time"]).split(":")]
+                curr_start = time(s_parts[0], s_parts[1])
+            except Exception:
+                curr_start = time(9, 0)
+            try:
+                e_parts = [int(p) for p in str(selected_row["End Time"]).split(":")]
+                curr_end = time(e_parts[0], e_parts[1])
+            except Exception:
+                curr_end = time(10, 0)
+
+            curr_cat_idx = categories.index(selected_row["Activity Category"]) if selected_row["Activity Category"] in categories else 0
+
+            with st.form("edit_ch_entry_form"):
+                e_date = st.date_input("Date", value=selected_row["Activity Date"])
+                e_cat = st.selectbox("Category", categories, index=curr_cat_idx)
+                
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    e_start = st.time_input("Start Time (24h)", value=curr_start)
+                with ec2:
+                    e_end = st.time_input("End Time (24h)", value=curr_end)
+
+                e_task = st.text_area("Task Description", value=str(selected_row["Specific Task / Description"]))
+                e_out = st.text_input("Outcome / Deliverable", value=str(selected_row["Outcome / Deliverable"]))
+
+                b_col1, b_col2 = st.columns(2)
+                with b_col1:
+                    update_btn = st.form_submit_button("💾 Save Changes", use_container_width=True)
+                with b_col2:
+                    delete_btn = st.form_submit_button("🗑️ Delete This Entry", use_container_width=True)
+
+                if update_btn:
+                    dur_m = (datetime.combine(e_date, e_end) - datetime.combine(e_date, e_start)).total_seconds() / 60
+                    if dur_m <= 0:
+                        st.error("End Time must be after Start Time.")
+                    else:
+                        row_idx = all_logs[all_logs["Entry ID"].astype(str) == str(chosen_eid)].index
+                        if not row_idx.empty:
+                            idx = row_idx[0]
+                            all_logs.at[idx, "Activity Date"] = str(e_date)
+                            all_logs.at[idx, "Activity Category"] = e_cat
+                            all_logs.at[idx, "Start Time"] = e_start.strftime("%H:%M")
+                            all_logs.at[idx, "End Time"] = e_end.strftime("%H:%M")
+                            all_logs.at[idx, "Duration (Hours)"] = round(dur_m / 60, 2)
+                            all_logs.at[idx, "Specific Task / Description"] = e_task.strip()
+                            all_logs.at[idx, "Outcome / Deliverable"] = e_out.strip()
+
+                            conn.update(worksheet="TUR_Logs", data=all_logs)
+                            st.success("Entry updated successfully!")
+                            st.rerun()
+
+                if delete_btn:
+                    all_logs = all_logs[all_logs["Entry ID"].astype(str) != str(chosen_eid)]
+                    conn.update(worksheet="TUR_Logs", data=all_logs)
+                    st.warning("Entry deleted.")
+                    st.rerun()
+
     st.markdown("---")
     tab_current, tab_past = st.tabs([f"📋 Today's Entries ({len(today_logs)} logged)", "📜 Previous History"])
     
@@ -289,7 +364,6 @@ elif user_role == "Program Head":
     st.title("⚡ Program Head Supervisory Portal")
     st.caption(f"Program Lead: **{user_name}** | Track: **{user_pod}**")
 
-    # Supervised cluster heads for this Program Head
     pod_cluster_heads = users_df[
         (users_df["Role"] == "Cluster Head") &
         ((users_df["Reporting To Email"].str.lower() == user_email) | (users_df["Program / Pod Name"] == user_pod))
@@ -298,7 +372,6 @@ elif user_role == "Program Head":
 
     all_logs = get_logs()
     
-    # Safe filtering for pod logs and Program Head's own logs
     if not all_logs.empty and "Cluster Head Email" in all_logs.columns:
         logs_emails_clean = all_logs["Cluster Head Email"].astype(str).str.strip().str.lower()
         pod_logs = all_logs[logs_emails_clean.isin(pod_emails)].copy()
@@ -322,7 +395,6 @@ elif user_role == "Program Head":
             ch_email = str(ch["Email"]).strip().lower()
             ch_name = ch["Name"]
             
-            # Safely check today's logs if pod_logs is not empty
             if not pod_logs.empty and "Activity Date" in pod_logs.columns:
                 ch_today = pod_logs[
                     (pod_logs["Cluster Head Email"].astype(str).str.strip().str.lower() == ch_email) & 
@@ -406,13 +478,86 @@ elif user_role == "Program Head":
 
     with ph_tab_my_history:
         st.markdown(f"### 📜 My Submitted Supervisory Logs ({user_name})")
+
+        # Edit/Delete for Program Head's own entries
         if not my_ph_logs.empty:
+            with st.expander("✏️ Edit or Delete My Submitted Log"):
+                ph_options = {}
+                for _, r in my_ph_logs.sort_values(by=["Activity Date", "Start Time"], ascending=[False, False]).iterrows():
+                    eid = str(r["Entry ID"])
+                    label = f"{r['Activity Date']} | {r['Start Time']}-{r['End Time']} | {r['Activity Category']}"
+                    ph_options[label] = eid
+
+                chosen_ph_label = st.selectbox("Select Log to Modify", list(ph_options.keys()))
+                chosen_ph_eid = ph_options[chosen_ph_label]
+                sel_ph_row = my_ph_logs[my_ph_logs["Entry ID"].astype(str) == str(chosen_ph_eid)].iloc[0]
+
+                try:
+                    ps_parts = [int(p) for p in str(sel_ph_row["Start Time"]).split(":")]
+                    p_curr_s = time(ps_parts[0], ps_parts[1])
+                except Exception:
+                    p_curr_s = time(9, 30)
+                try:
+                    pe_parts = [int(p) for p in str(sel_ph_row["End Time"]).split(":")]
+                    p_curr_e = time(pe_parts[0], pe_parts[1])
+                except Exception:
+                    p_curr_e = time(11, 0)
+
+                ph_categories = get_categories_for_role("Program Head")
+                p_cat_idx = ph_categories.index(sel_ph_row["Activity Category"]) if sel_ph_row["Activity Category"] in ph_categories else 0
+
+                with st.form("edit_ph_entry_form"):
+                    pe_date = st.date_input("Date", value=sel_ph_row["Activity Date"])
+                    pe_cat = st.selectbox("Category", ph_categories, index=p_cat_idx)
+                    pec1, pec2 = st.columns(2)
+                    with pec1:
+                        pe_start = st.time_input("Start Time (24h)", value=p_curr_s)
+                    with pec2:
+                        pe_end = st.time_input("End Time (24h)", value=p_curr_e)
+
+                    pe_task = st.text_area("Supervisory Details", value=str(sel_ph_row["Specific Task / Description"]))
+                    pe_out = st.text_input("Outcome / Deliverable", value=str(sel_ph_row["Outcome / Deliverable"]))
+
+                    ph_btn1, ph_btn2 = st.columns(2)
+                    with ph_btn1:
+                        ph_save = st.form_submit_button("💾 Save Changes", use_container_width=True)
+                    with ph_btn2:
+                        ph_del = st.form_submit_button("🗑️ Delete This Log", use_container_width=True)
+
+                    if ph_save:
+                        dur_m = (datetime.combine(pe_date, pe_end) - datetime.combine(pe_date, pe_start)).total_seconds() / 60
+                        if dur_m <= 0:
+                            st.error("End Time must be after Start Time.")
+                        else:
+                            row_idx = all_logs[all_logs["Entry ID"].astype(str) == str(chosen_ph_eid)].index
+                            if not row_idx.empty:
+                                idx = row_idx[0]
+                                all_logs.at[idx, "Activity Date"] = str(pe_date)
+                                all_logs.at[idx, "Activity Category"] = pe_cat
+                                all_logs.at[idx, "Start Time"] = pe_start.strftime("%H:%M")
+                                all_logs.at[idx, "End Time"] = pe_end.strftime("%H:%M")
+                                all_logs.at[idx, "Duration (Hours)"] = round(dur_m / 60, 2)
+                                all_logs.at[idx, "Specific Task / Description"] = pe_task.strip()
+                                all_logs.at[idx, "Outcome / Deliverable"] = pe_out.strip()
+
+                                conn.update(worksheet="TUR_Logs", data=all_logs)
+                                st.success("Log updated!")
+                                st.rerun()
+
+                    if ph_del:
+                        all_logs = all_logs[all_logs["Entry ID"].astype(str) != str(chosen_ph_eid)]
+                        conn.update(worksheet="TUR_Logs", data=all_logs)
+                        st.warning("Log deleted.")
+                        st.rerun()
+
+            st.markdown("---")
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_my_cols = [c for c in cols if c in my_ph_logs.columns]
             sorted_my_logs = my_ph_logs[available_my_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
             st.dataframe(format_table_indexed(sorted_my_logs), use_container_width=True)
         else:
             st.info("You haven't logged any personal supervisory activities yet.")
+
 # =========================================================
 # TIER 3: CORE LEADERSHIP (Clean Executive Cockpit)
 # =========================================================
@@ -470,7 +615,6 @@ else:
                 })
 
             roster_df = pd.DataFrame(roster_data)
-            # Sort with active members on top
             roster_df = roster_df.sort_values(by=["Total Hours", "Name"], ascending=[False, True])
             st.dataframe(format_table_indexed(roster_df), use_container_width=True)
 
