@@ -126,6 +126,9 @@ def get_categories_for_role(role_name):
 if "authenticated_user" not in st.session_state:
     st.session_state.authenticated_user = None
 
+if "show_pin_change" not in st.session_state:
+    st.session_state.show_pin_change = False
+
 users_df = get_users_directory()
 
 # ---------------------------------------------------------
@@ -154,8 +157,14 @@ if st.session_state.authenticated_user:
     if curr_user.get("Program / Pod Name"):
         st.sidebar.caption(f"Track: **{curr_user['Program / Pod Name']}**")
 
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔑 Change My PIN", use_container_width=True):
+        st.session_state.show_pin_change = not st.session_state.show_pin_change
+        st.rerun()
+
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.authenticated_user = None
+        st.session_state.show_pin_change = False
         st.rerun()
 
 # ---------------------------------------------------------
@@ -190,16 +199,49 @@ if not st.session_state.authenticated_user:
     st.stop()
 
 # ---------------------------------------------------------
-# Active Authenticated Session
+# Active Authenticated Session & Forced PIN Reset Check
 # ---------------------------------------------------------
 curr_user = st.session_state.authenticated_user
 user_role = curr_user["Role"]
 user_email = curr_user["Email"]
 user_name = curr_user["Name"]
 user_pod = curr_user.get("Program / Pod Name", "")
+current_pin = str(curr_user.get("PIN", "")).strip()
+
+# Check if user is using default PIN or clicked Change PIN
+is_default_pin = (current_pin == "1234")
+if is_default_pin or st.session_state.show_pin_change:
+    st.warning("🔒 Security Setup: Update Your 4-Digit PIN" if is_default_pin else "🔑 Update Your 4-Digit PIN")
+    st.info("To protect your account and logs, choose a private 4-digit PIN that only you know.")
+
+    with st.form("pin_reset_form"):
+        new_pin = st.text_input("New 4-Digit PIN", type="password", max_chars=4, placeholder="4 digits")
+        confirm_pin = st.text_input("Confirm New PIN", type="password", max_chars=4, placeholder="Confirm 4 digits")
+        save_pin_btn = st.form_submit_button("Save New PIN ➔", use_container_width=True)
+
+        if save_pin_btn:
+            if not new_pin.isdigit() or len(new_pin) != 4:
+                st.error("PIN must be exactly 4 numerical digits.")
+            elif new_pin == "1234":
+                st.error("You cannot reuse the default PIN '1234'. Choose a unique PIN.")
+            elif new_pin != confirm_pin:
+                st.error("New PIN and Confirm PIN do not match.")
+            else:
+                all_u = get_users_directory()
+                idx_matches = all_u[all_u["Email"] == user_email].index
+                if not idx_matches.empty:
+                    all_u.at[idx_matches[0], "PIN"] = new_pin
+                    conn.update(worksheet="Users_Directory", data=all_u)
+                    st.session_state.authenticated_user["PIN"] = new_pin
+                    st.session_state.show_pin_change = False
+                    st.success("Your PIN has been updated securely!")
+                    st.rerun()
+
+    if is_default_pin:
+        st.stop()
 
 # =========================================================
-# TIER 1: CLUSTER HEAD (Logger + Edit / Delete My Entries)
+# TIER 1: CLUSTER HEAD (Logger + Soft-Delete / Edit)
 # =========================================================
 if user_role == "Cluster Head":
     st.title("⚡ Cluster Head Daily TUR")
@@ -210,8 +252,16 @@ if user_role == "Cluster Head":
 
     active_date = st.date_input("Activity Date", value=date.today())
 
-    my_logs = all_logs[all_logs["Cluster Head Email"].str.lower() == user_email] if not all_logs.empty else pd.DataFrame()
-    today_logs = my_logs[my_logs["Activity Date"] == active_date] if not my_logs.empty else pd.DataFrame()
+    # Filter out soft-deleted entries
+    if not all_logs.empty and "Cluster Head Email" in all_logs.columns:
+        my_logs = all_logs[
+            (all_logs["Cluster Head Email"].astype(str).str.strip().str.lower() == user_email) &
+            (all_logs.get("Status / Verification", "") != "Deleted by User")
+        ].copy()
+    else:
+        my_logs = pd.DataFrame(columns=EXPECTED_LOG_COLS)
+
+    today_logs = my_logs[my_logs["Activity Date"] == active_date] if not my_logs.empty else pd.DataFrame(columns=EXPECTED_LOG_COLS)
 
     st.markdown("### 📝 Log Time Slot")
     st.info("🕒 **Time Format:** 24-Hour Clock (e.g. 09:00 for 9:00 AM, 15:30 for 3:30 PM)")
@@ -262,24 +312,22 @@ if user_role == "Cluster Head":
                 st.success(f"Slot recorded: {dur_hrs} hrs under '{category}'!")
                 st.rerun()
 
-    # Self-Service Edit / Delete Panel
+    # Self-Service Edit / Soft-Delete Panel
     if not my_logs.empty:
         with st.expander("✏️ Edit or Delete an Existing Entry"):
             st.caption("Select one of your previously submitted entries to update or remove.")
             
-            # Format choices cleanly
             my_logs_sorted = my_logs.sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
             entry_options = {}
             for _, r in my_logs_sorted.iterrows():
                 eid = str(r["Entry ID"])
-                label = f"{r['Activity Date']} | {r['Start Time']}-{r['End Time']} | {r['Activity Category']} ({r['Outcome / Deliverable'][:30]}...)"
+                label = f"{r['Activity Date']} | {r['Start Time']}-{r['End Time']} | {r['Activity Category']} ({str(r['Outcome / Deliverable'])[:25]}...)"
                 entry_options[label] = eid
 
             chosen_label = st.selectbox("Select Entry to Modify", list(entry_options.keys()))
             chosen_eid = entry_options[chosen_label]
             selected_row = my_logs[my_logs["Entry ID"].astype(str) == str(chosen_eid)].iloc[0]
 
-            # Parse times safely
             try:
                 s_parts = [int(p) for p in str(selected_row["Start Time"]).split(":")]
                 curr_start = time(s_parts[0], s_parts[1])
@@ -333,10 +381,13 @@ if user_role == "Cluster Head":
                             st.rerun()
 
                 if delete_btn:
-                    all_logs = all_logs[all_logs["Entry ID"].astype(str) != str(chosen_eid)]
-                    conn.update(worksheet="TUR_Logs", data=all_logs)
-                    st.warning("Entry deleted.")
-                    st.rerun()
+                    row_idx = all_logs[all_logs["Entry ID"].astype(str) == str(chosen_eid)].index
+                    if not row_idx.empty:
+                        idx = row_idx[0]
+                        all_logs.at[idx, "Status / Verification"] = "Deleted by User"
+                        conn.update(worksheet="TUR_Logs", data=all_logs)
+                        st.warning("Entry removed successfully.")
+                        st.rerun()
 
     st.markdown("---")
     tab_current, tab_past = st.tabs([f"📋 Today's Entries ({len(today_logs)} logged)", "📜 Previous History"])
@@ -372,10 +423,12 @@ elif user_role == "Program Head":
 
     all_logs = get_logs()
     
+    # Exclude soft-deleted logs from operational views
     if not all_logs.empty and "Cluster Head Email" in all_logs.columns:
         logs_emails_clean = all_logs["Cluster Head Email"].astype(str).str.strip().str.lower()
-        pod_logs = all_logs[logs_emails_clean.isin(pod_emails)].copy()
-        my_ph_logs = all_logs[logs_emails_clean == user_email].copy()
+        active_status = all_logs.get("Status / Verification", "") != "Deleted by User"
+        pod_logs = all_logs[logs_emails_clean.isin(pod_emails) & active_status].copy()
+        my_ph_logs = all_logs[(logs_emails_clean == user_email) & active_status].copy()
     else:
         pod_logs = pd.DataFrame(columns=EXPECTED_LOG_COLS)
         my_ph_logs = pd.DataFrame(columns=EXPECTED_LOG_COLS)
@@ -479,7 +532,6 @@ elif user_role == "Program Head":
     with ph_tab_my_history:
         st.markdown(f"### 📜 My Submitted Supervisory Logs ({user_name})")
 
-        # Edit/Delete for Program Head's own entries
         if not my_ph_logs.empty:
             with st.expander("✏️ Edit or Delete My Submitted Log"):
                 ph_options = {}
@@ -532,7 +584,7 @@ elif user_role == "Program Head":
                             row_idx = all_logs[all_logs["Entry ID"].astype(str) == str(chosen_ph_eid)].index
                             if not row_idx.empty:
                                 idx = row_idx[0]
-                                all_logs.at[idx, "Activity Date"] = str(pe_date)
+                                all_logs.at[idx, "Activity Date"] = str(e_date)
                                 all_logs.at[idx, "Activity Category"] = pe_cat
                                 all_logs.at[idx, "Start Time"] = pe_start.strftime("%H:%M")
                                 all_logs.at[idx, "End Time"] = pe_end.strftime("%H:%M")
@@ -545,10 +597,13 @@ elif user_role == "Program Head":
                                 st.rerun()
 
                     if ph_del:
-                        all_logs = all_logs[all_logs["Entry ID"].astype(str) != str(chosen_ph_eid)]
-                        conn.update(worksheet="TUR_Logs", data=all_logs)
-                        st.warning("Log deleted.")
-                        st.rerun()
+                        row_idx = all_logs[all_logs["Entry ID"].astype(str) == str(chosen_ph_eid)].index
+                        if not row_idx.empty:
+                            idx = row_idx[0]
+                            all_logs.at[idx, "Status / Verification"] = "Deleted by User"
+                            conn.update(worksheet="TUR_Logs", data=all_logs)
+                            st.warning("Log removed.")
+                            st.rerun()
 
             st.markdown("---")
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
@@ -580,7 +635,8 @@ else:
             pods = ["All Subject Tracks"] + sorted([p for p in users_df["Program / Pod Name"].dropna().unique() if p != "All Programs"])
             selected_pod = st.selectbox("Filter Subject Track / Pod", pods)
 
-        filtered_logs = all_logs.copy()
+        # Exclude soft-deleted records from active totals
+        filtered_logs = all_logs[all_logs.get("Status / Verification", "") != "Deleted by User"].copy()
         if len(d_range) == 2:
             filtered_logs = filtered_logs[(filtered_logs["Activity Date"] >= d_range[0]) & (filtered_logs["Activity Date"] <= d_range[1])]
 
@@ -588,9 +644,10 @@ else:
         if selected_pod != "All Subject Tracks":
             display_users = display_users[display_users["Program / Pod Name"] == selected_pod]
 
-        clt_tab_roster, clt_tab_member, clt_tab_export = st.tabs([
+        clt_tab_roster, clt_tab_member, clt_tab_audit, clt_tab_export = st.tabs([
             "👥 Team Overview & Compliance", 
             "🔍 Member-by-Member Inspection", 
+            "🗑️ Audit & Deleted Records",
             "📥 Data Export"
         ])
 
@@ -658,6 +715,18 @@ else:
                     st.dataframe(format_table_indexed(sorted_member_logs), use_container_width=True)
                 else:
                     st.info(f"No activity records found for {chosen_member} in the selected date range.")
+
+        with clt_tab_audit:
+            st.markdown("### 🗑️ Soft-Deleted Records Audit Trail")
+            st.caption("Entries deleted by users remain recorded here. Leadership can inspect them anytime.")
+            deleted_logs = all_logs[all_logs.get("Status / Verification", "") == "Deleted by User"].copy()
+            if not deleted_logs.empty:
+                cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
+                available_del_cols = [c for c in cols if c in deleted_logs.columns]
+                sorted_del = deleted_logs[available_del_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
+                st.dataframe(format_table_indexed(sorted_del), use_container_width=True)
+            else:
+                st.info("No records have been deleted by users.")
 
         with clt_tab_export:
             st.markdown("### 📥 Export Filtered Logs")
