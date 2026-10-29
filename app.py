@@ -6,7 +6,7 @@ from datetime import datetime, time, date
 import uuid
 
 # ---------------------------------------------------------
-# Page Configuration & Styling
+# Page Configuration & Global Styling
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="PiVector TUR Engine",
@@ -45,8 +45,66 @@ st.markdown("""
         font-weight: 600;
         font-size: 0.85rem;
     }
+    /* Responsive HTML Table with Multiline Text Auto-Wrapping */
+    .tur-table-container {
+        width: 100%;
+        overflow-x: auto;
+        margin-top: 12px;
+        margin-bottom: 24px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .tur-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.88rem;
+        background-color: #ffffff;
+    }
+    .tur-table th {
+        background-color: #0f172a;
+        color: #f8fafc;
+        text-align: left;
+        padding: 10px 14px;
+        font-weight: 600;
+        border-bottom: 2px solid #cbd5e1;
+        white-space: nowrap;
+    }
+    .tur-table td {
+        padding: 10px 14px;
+        border-bottom: 1px solid #e2e8f0;
+        vertical-align: top;
+        color: #1e293b;
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+        line-height: 1.45;
+    }
+    .tur-table tr:nth-child(even) {
+        background-color: #f8fafc;
+    }
+    .tur-table tr:hover {
+        background-color: #f1f5f9;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------------
+def render_wrapped_table(df):
+    """Renders a fully responsive HTML table with multiline auto-wrapping."""
+    if df.empty:
+        st.info("No records to display.")
+        return
+    
+    df_display = df.copy()
+    df_display.index = range(1, len(df_display) + 1)
+    df_display.index.name = "S.No."
+    
+    html = df_display.to_html(classes="tur-table", escape=False)
+    st.markdown(f'<div class="tur-table-container">{html}</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # Google Sheets Connection & Data Fetchers
@@ -60,20 +118,18 @@ EXPECTED_LOG_COLS = [
     "Status / Verification", "Role"
 ]
 
-def format_table_indexed(df):
-    if df.empty:
-        return df
-    df_out = df.copy()
-    df_out.index = range(1, len(df_out) + 1)
-    df_out.index.name = "S.No."
-    return df_out
-
 def get_users_directory():
     try:
         df = conn.read(worksheet="Users_Directory", ttl="0m")
         if df is not None and not df.empty:
             df["Email"] = df["Email"].astype(str).str.strip().str.lower()
-            df["PIN"] = df["PIN"].astype(str).str.replace(".0", "", regex=False).str.strip()
+            df["PIN"] = (
+                df["PIN"]
+                .astype(str)
+                .str.replace(".0", "", regex=False)
+                .str.strip()
+                .apply(lambda p: p.zfill(4) if p.isdigit() and len(p) < 4 else p)
+            )
             return df
     except Exception:
         pass
@@ -186,9 +242,10 @@ if not st.session_state.authenticated_user:
                 st.warning("Please enter both your work email and 4-digit PIN.")
             else:
                 fresh_users = get_users_directory()
+                norm_entered_pin = entered_pin.zfill(4) if entered_pin.isdigit() and len(entered_pin) < 4 else entered_pin
                 user_match = fresh_users[
                     (fresh_users["Email"] == entered_email) & 
-                    (fresh_users["PIN"] == entered_pin)
+                    (fresh_users["PIN"] == norm_entered_pin)
                 ]
                 if not user_match.empty:
                     user_data = user_match.iloc[0].to_dict()
@@ -208,7 +265,6 @@ user_name = curr_user["Name"]
 user_pod = curr_user.get("Program / Pod Name", "")
 current_pin = str(curr_user.get("PIN", "")).strip()
 
-# Check if user is using default PIN or clicked Change PIN
 is_default_pin = (current_pin == "1234")
 if is_default_pin or st.session_state.show_pin_change:
     st.warning("🔒 Security Setup: Update Your 4-Digit PIN" if is_default_pin else "🔑 Update Your 4-Digit PIN")
@@ -230,9 +286,10 @@ if is_default_pin or st.session_state.show_pin_change:
                 all_u = get_users_directory()
                 idx_matches = all_u[all_u["Email"] == user_email].index
                 if not idx_matches.empty:
-                    all_u.at[idx_matches[0], "PIN"] = new_pin
+                    pin_str = str(new_pin).zfill(4)
+                    all_u.at[idx_matches[0], "PIN"] = pin_str
                     conn.update(worksheet="Users_Directory", data=all_u)
-                    st.session_state.authenticated_user["PIN"] = new_pin
+                    st.session_state.authenticated_user["PIN"] = pin_str
                     st.session_state.show_pin_change = False
                     st.success("Your PIN has been updated securely!")
                     st.rerun()
@@ -252,7 +309,6 @@ if user_role == "Cluster Head":
 
     active_date = st.date_input("Activity Date", value=date.today())
 
-    # Filter out soft-deleted entries
     if not all_logs.empty and "Cluster Head Email" in all_logs.columns:
         my_logs = all_logs[
             (all_logs["Cluster Head Email"].astype(str).str.strip().str.lower() == user_email) &
@@ -396,15 +452,15 @@ if user_role == "Cluster Head":
         if not today_logs.empty:
             cols = ["Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             sorted_today = today_logs[cols].sort_values(by="Start Time", ascending=False)
-            st.dataframe(format_table_indexed(sorted_today), use_container_width=True)
+            render_wrapped_table(sorted_today)
         else:
             st.info("No entries recorded for this date yet.")
 
     with tab_past:
         if not my_logs.empty:
-            cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable"]
+            cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             sorted_past = my_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            st.dataframe(format_table_indexed(sorted_past), use_container_width=True)
+            render_wrapped_table(sorted_past)
         else:
             st.info("No past logs found.")
 
@@ -423,7 +479,6 @@ elif user_role == "Program Head":
 
     all_logs = get_logs()
     
-    # Exclude soft-deleted logs from operational views
     if not all_logs.empty and "Cluster Head Email" in all_logs.columns:
         logs_emails_clean = all_logs["Cluster Head Email"].astype(str).str.strip().str.lower()
         active_status = all_logs.get("Status / Verification", "") != "Deleted by User"
@@ -466,7 +521,7 @@ elif user_role == "Program Head":
                 "Status": "✅ Active" if slots_count > 0 else "⏳ Not Logged"
             })
 
-        st.dataframe(format_table_indexed(pd.DataFrame(status_data)), use_container_width=True)
+        render_wrapped_table(pd.DataFrame(status_data))
 
         st.markdown("---")
         st.markdown("### 📋 Pod Activity Ledger (Most Recent First)")
@@ -477,10 +532,10 @@ elif user_role == "Program Head":
             display_logs = display_logs[display_logs["Cluster Head Name"] == selected_ch]
 
         if not display_logs.empty:
-            cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Outcome / Deliverable"]
+            cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_cols = [c for c in cols if c in display_logs.columns]
             sorted_pod_logs = display_logs[available_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            st.dataframe(format_table_indexed(sorted_pod_logs), use_container_width=True)
+            render_wrapped_table(sorted_pod_logs)
         else:
             st.info("No records to display for this pod yet.")
 
@@ -584,7 +639,7 @@ elif user_role == "Program Head":
                             row_idx = all_logs[all_logs["Entry ID"].astype(str) == str(chosen_ph_eid)].index
                             if not row_idx.empty:
                                 idx = row_idx[0]
-                                all_logs.at[idx, "Activity Date"] = str(e_date)
+                                all_logs.at[idx, "Activity Date"] = str(pe_date)
                                 all_logs.at[idx, "Activity Category"] = pe_cat
                                 all_logs.at[idx, "Start Time"] = pe_start.strftime("%H:%M")
                                 all_logs.at[idx, "End Time"] = pe_end.strftime("%H:%M")
@@ -609,7 +664,7 @@ elif user_role == "Program Head":
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_my_cols = [c for c in cols if c in my_ph_logs.columns]
             sorted_my_logs = my_ph_logs[available_my_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            st.dataframe(format_table_indexed(sorted_my_logs), use_container_width=True)
+            render_wrapped_table(sorted_my_logs)
         else:
             st.info("You haven't logged any personal supervisory activities yet.")
 
@@ -635,7 +690,6 @@ else:
             pods = ["All Subject Tracks"] + sorted([p for p in users_df["Program / Pod Name"].dropna().unique() if p != "All Programs"])
             selected_pod = st.selectbox("Filter Subject Track / Pod", pods)
 
-        # Exclude soft-deleted records from active totals
         filtered_logs = all_logs[all_logs.get("Status / Verification", "") != "Deleted by User"].copy()
         if len(d_range) == 2:
             filtered_logs = filtered_logs[(filtered_logs["Activity Date"] >= d_range[0]) & (filtered_logs["Activity Date"] <= d_range[1])]
@@ -673,7 +727,7 @@ else:
 
             roster_df = pd.DataFrame(roster_data)
             roster_df = roster_df.sort_values(by=["Total Hours", "Name"], ascending=[False, True])
-            st.dataframe(format_table_indexed(roster_df), use_container_width=True)
+            render_wrapped_table(roster_df)
 
         with clt_tab_member:
             st.markdown("### 🔍 Individual Member Drill-Down")
@@ -712,7 +766,7 @@ else:
                     st.markdown("#### Activity Ledger (Most Recent First)")
                     cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
                     sorted_member_logs = member_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-                    st.dataframe(format_table_indexed(sorted_member_logs), use_container_width=True)
+                    render_wrapped_table(sorted_member_logs)
                 else:
                     st.info(f"No activity records found for {chosen_member} in the selected date range.")
 
@@ -724,7 +778,7 @@ else:
                 cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
                 available_del_cols = [c for c in cols if c in deleted_logs.columns]
                 sorted_del = deleted_logs[available_del_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-                st.dataframe(format_table_indexed(sorted_del), use_container_width=True)
+                render_wrapped_table(sorted_del)
             else:
                 st.info("No records have been deleted by users.")
 
