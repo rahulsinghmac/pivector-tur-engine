@@ -45,66 +45,34 @@ st.markdown("""
         font-weight: 600;
         font-size: 0.85rem;
     }
-    /* Responsive HTML Table with Multiline Text Auto-Wrapping */
-    .tur-table-container {
-        width: 100%;
-        overflow-x: auto;
-        margin-top: 12px;
-        margin-bottom: 24px;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .tur-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 0.88rem;
-        background-color: #ffffff;
-    }
-    .tur-table th {
-        background-color: #0f172a;
-        color: #f8fafc;
-        text-align: left;
-        padding: 10px 14px;
-        font-weight: 600;
-        border-bottom: 2px solid #cbd5e1;
-        white-space: nowrap;
-    }
-    .tur-table td {
-        padding: 10px 14px;
-        border-bottom: 1px solid #e2e8f0;
-        vertical-align: top;
-        color: #1e293b;
-        white-space: normal !important;
-        word-break: break-word !important;
-        overflow-wrap: break-word !important;
-        line-height: 1.45;
-    }
-    .tur-table tr:nth-child(even) {
-        background-color: #f8fafc;
-    }
-    .tur-table tr:hover {
-        background-color: #f1f5f9;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Helper Functions
+# Clean Table Renderer (Native Streamlit, S.No starts at 1)
 # ---------------------------------------------------------
-def render_wrapped_table(df):
-    """Renders a fully responsive HTML table with multiline auto-wrapping."""
+def display_clean_table(df, key=None):
+    """Renders a clean native Streamlit table with S.No starting at 1 and readable columns."""
     if df.empty:
         st.info("No records to display.")
         return
-    
-    df_display = df.copy()
-    df_display.index = range(1, len(df_display) + 1)
-    df_display.index.name = "S.No."
-    
-    html = df_display.to_html(classes="tur-table", escape=False)
-    st.markdown(f'<div class="tur-table-container">{html}</div>', unsafe_allow_html=True)
+
+    df_out = df.copy()
+    df_out.insert(0, "S.No.", range(1, len(df_out) + 1))
+
+    col_cfg = {
+        "S.No.": st.column_config.NumberColumn("S.No.", width="small"),
+        "Specific Task / Description": st.column_config.TextColumn("Specific Task / Description", width="large"),
+        "Outcome / Deliverable": st.column_config.TextColumn("Outcome / Deliverable", width="medium"),
+    }
+
+    st.dataframe(
+        df_out,
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_cfg,
+        key=key
+    )
 
 # ---------------------------------------------------------
 # Google Sheets Connection & Data Fetchers
@@ -452,7 +420,7 @@ if user_role == "Cluster Head":
         if not today_logs.empty:
             cols = ["Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             sorted_today = today_logs[cols].sort_values(by="Start Time", ascending=False)
-            render_wrapped_table(sorted_today)
+            display_clean_table(sorted_today, key="ch_today_table")
         else:
             st.info("No entries recorded for this date yet.")
 
@@ -460,7 +428,7 @@ if user_role == "Cluster Head":
         if not my_logs.empty:
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             sorted_past = my_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            render_wrapped_table(sorted_past)
+            display_clean_table(sorted_past, key="ch_past_table")
         else:
             st.info("No past logs found.")
 
@@ -521,7 +489,7 @@ elif user_role == "Program Head":
                 "Status": "✅ Active" if slots_count > 0 else "⏳ Not Logged"
             })
 
-        render_wrapped_table(pd.DataFrame(status_data))
+        display_clean_table(pd.DataFrame(status_data), key="ph_status_table")
 
         st.markdown("---")
         st.markdown("### 📋 Pod Activity Ledger (Most Recent First)")
@@ -535,7 +503,7 @@ elif user_role == "Program Head":
             cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_cols = [c for c in cols if c in display_logs.columns]
             sorted_pod_logs = display_logs[available_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            render_wrapped_table(sorted_pod_logs)
+            display_clean_table(sorted_pod_logs, key="ph_pod_ledger_table")
         else:
             st.info("No records to display for this pod yet.")
 
@@ -664,7 +632,7 @@ elif user_role == "Program Head":
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_my_cols = [c for c in cols if c in my_ph_logs.columns]
             sorted_my_logs = my_ph_logs[available_my_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            render_wrapped_table(sorted_my_logs)
+            display_clean_table(sorted_my_logs, key="ph_my_logs_table")
         else:
             st.info("You haven't logged any personal supervisory activities yet.")
 
@@ -727,7 +695,7 @@ else:
 
             roster_df = pd.DataFrame(roster_data)
             roster_df = roster_df.sort_values(by=["Total Hours", "Name"], ascending=[False, True])
-            render_wrapped_table(roster_df)
+            display_clean_table(roster_df, key="clt_roster_table")
 
         with clt_tab_member:
             st.markdown("### 🔍 Individual Member Drill-Down")
@@ -766,7 +734,7 @@ else:
                     st.markdown("#### Activity Ledger (Most Recent First)")
                     cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
                     sorted_member_logs = member_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-                    render_wrapped_table(sorted_member_logs)
+                    display_clean_table(sorted_member_logs, key="clt_member_ledger_table")
                 else:
                     st.info(f"No activity records found for {chosen_member} in the selected date range.")
 
@@ -778,7 +746,7 @@ else:
                 cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
                 available_del_cols = [c for c in cols if c in deleted_logs.columns]
                 sorted_del = deleted_logs[available_del_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-                render_wrapped_table(sorted_del)
+                display_clean_table(sorted_del, key="clt_audit_table")
             else:
                 st.info("No records have been deleted by users.")
 
