@@ -45,14 +45,60 @@ st.markdown("""
         font-weight: 600;
         font-size: 0.85rem;
     }
+
+    /* Light, Clean Executive Table with True Multiline Auto-Wrap */
+    .pv-table-container {
+        width: 100%;
+        overflow-x: auto;
+        margin-top: 10px;
+        margin-bottom: 22px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background-color: #ffffff;
+    }
+    .pv-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.875rem;
+        color: #1e293b;
+        background: #ffffff;
+    }
+    .pv-table th {
+        background-color: #f8fafc;
+        color: #475569;
+        font-weight: 600;
+        text-align: left;
+        padding: 11px 14px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 0.84rem;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+    }
+    .pv-table td {
+        padding: 11px 14px;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: top;
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+        line-height: 1.5;
+        color: #334155;
+    }
+    .pv-table tr:last-child td {
+        border-bottom: none;
+    }
+    .pv-table tr:hover td {
+        background-color: #f8fafc;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Clean Table Renderer (Native Streamlit, S.No starts at 1)
+# Clean Light Table Renderer (Auto-Wrap + S.No from 1)
 # ---------------------------------------------------------
-def display_clean_table(df, key=None):
-    """Renders a clean native Streamlit table with S.No starting at 1 and readable columns."""
+def display_clean_table(df):
+    """Renders light table with multi-line text wrapping and S.No starting at 1."""
     if df.empty:
         st.info("No records to display.")
         return
@@ -60,19 +106,13 @@ def display_clean_table(df, key=None):
     df_out = df.copy()
     df_out.insert(0, "S.No.", range(1, len(df_out) + 1))
 
-    col_cfg = {
-        "S.No.": st.column_config.NumberColumn("S.No.", width="small"),
-        "Specific Task / Description": st.column_config.TextColumn("Specific Task / Description", width="large"),
-        "Outcome / Deliverable": st.column_config.TextColumn("Outcome / Deliverable", width="medium"),
-    }
+    # Convert newlines to HTML line breaks for clean multiline display
+    for col in df_out.columns:
+        if df_out[col].dtype == "object":
+            df_out[col] = df_out[col].astype(str).str.replace("\n", "<br/>")
 
-    st.dataframe(
-        df_out,
-        use_container_width=True,
-        hide_index=True,
-        column_config=col_cfg,
-        key=key
-    )
+    html_content = df_out.to_html(classes="pv-table", index=False, escape=False)
+    st.markdown(f'<div class="pv-table-container">{html_content}</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # Google Sheets Connection & Data Fetchers
@@ -420,7 +460,7 @@ if user_role == "Cluster Head":
         if not today_logs.empty:
             cols = ["Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             sorted_today = today_logs[cols].sort_values(by="Start Time", ascending=False)
-            display_clean_table(sorted_today, key="ch_today_table")
+            display_clean_table(sorted_today)
         else:
             st.info("No entries recorded for this date yet.")
 
@@ -428,7 +468,7 @@ if user_role == "Cluster Head":
         if not my_logs.empty:
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             sorted_past = my_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            display_clean_table(sorted_past, key="ch_past_table")
+            display_clean_table(sorted_past)
         else:
             st.info("No past logs found.")
 
@@ -489,7 +529,7 @@ elif user_role == "Program Head":
                 "Status": "✅ Active" if slots_count > 0 else "⏳ Not Logged"
             })
 
-        display_clean_table(pd.DataFrame(status_data), key="ph_status_table")
+        display_clean_table(pd.DataFrame(status_data))
 
         st.markdown("---")
         st.markdown("### 📋 Pod Activity Ledger (Most Recent First)")
@@ -503,7 +543,7 @@ elif user_role == "Program Head":
             cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_cols = [c for c in cols if c in display_logs.columns]
             sorted_pod_logs = display_logs[available_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            display_clean_table(sorted_pod_logs, key="ph_pod_ledger_table")
+            display_clean_table(sorted_pod_logs)
         else:
             st.info("No records to display for this pod yet.")
 
@@ -632,7 +672,7 @@ elif user_role == "Program Head":
             cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
             available_my_cols = [c for c in cols if c in my_ph_logs.columns]
             sorted_my_logs = my_ph_logs[available_my_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-            display_clean_table(sorted_my_logs, key="ph_my_logs_table")
+            display_clean_table(sorted_my_logs)
         else:
             st.info("You haven't logged any personal supervisory activities yet.")
 
@@ -695,7 +735,7 @@ else:
 
             roster_df = pd.DataFrame(roster_data)
             roster_df = roster_df.sort_values(by=["Total Hours", "Name"], ascending=[False, True])
-            display_clean_table(roster_df, key="clt_roster_table")
+            display_clean_table(roster_df)
 
         with clt_tab_member:
             st.markdown("### 🔍 Individual Member Drill-Down")
@@ -734,7 +774,7 @@ else:
                     st.markdown("#### Activity Ledger (Most Recent First)")
                     cols = ["Activity Date", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
                     sorted_member_logs = member_logs[cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-                    display_clean_table(sorted_member_logs, key="clt_member_ledger_table")
+                    display_clean_table(sorted_member_logs)
                 else:
                     st.info(f"No activity records found for {chosen_member} in the selected date range.")
 
@@ -746,7 +786,7 @@ else:
                 cols = ["Activity Date", "Cluster Head Name", "Start Time", "End Time", "Duration (Hours)", "Activity Category", "Specific Task / Description", "Outcome / Deliverable"]
                 available_del_cols = [c for c in cols if c in deleted_logs.columns]
                 sorted_del = deleted_logs[available_del_cols].sort_values(by=["Activity Date", "Start Time"], ascending=[False, False])
-                display_clean_table(sorted_del, key="clt_audit_table")
+                display_clean_table(sorted_del)
             else:
                 st.info("No records have been deleted by users.")
 
